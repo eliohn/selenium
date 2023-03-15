@@ -3,9 +3,9 @@ package selenium
 import (
 	"time"
 
-	"github.com/tebeka/selenium/chrome"
-	"github.com/tebeka/selenium/firefox"
-	"github.com/tebeka/selenium/log"
+	"github.com/eliohn/selenium/chrome"
+	"github.com/eliohn/selenium/firefox"
+	"github.com/eliohn/selenium/log"
 )
 
 // TODO(minusnine): make an enum type called FindMethod.
@@ -430,6 +430,8 @@ type WebDriver interface {
 
 	//Wait works like WaitWithTimeoutAndInterval, but using the default timeout and polling interval.
 	Wait(condition Condition) error
+
+	GetResponseBody(requestId string) ([]byte, error)
 }
 
 // WebElement defines method supported by web elements.

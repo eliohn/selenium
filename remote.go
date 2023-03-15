@@ -9,7 +9,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io/ioutil"
+	"io"
 	"mime"
 	"net/http"
 	"net/url"
@@ -18,8 +18,8 @@ import (
 	"time"
 
 	"github.com/blang/semver"
-	"github.com/tebeka/selenium/firefox"
-	"github.com/tebeka/selenium/log"
+	"github.com/eliohn/selenium/firefox"
+	"github.com/eliohn/selenium/log"
 )
 
 // Errors returned by Selenium server.
@@ -54,6 +54,15 @@ type remoteWD struct {
 	storedActions  Actions
 	browser        string
 	browserVersion semver.Version
+}
+
+type CdpCmd struct {
+	Cmd    string    `json:"cmd"`
+	Params CdpParams `json:"params"`
+}
+
+type CdpParams struct {
+	RequestId string `json:"requestId"`
 }
 
 // HTTPClient is the default client to use to communicate with the WebDriver
@@ -140,7 +149,7 @@ func executeCommand(method, url string, data []byte) (json.RawMessage, error) {
 		return nil, err
 	}
 
-	buf, err := ioutil.ReadAll(response.Body)
+	buf, err := io.ReadAll(response.Body)
 	if debugFlag {
 		if err == nil {
 			// Pretty print the JSON response
@@ -237,6 +246,24 @@ func NewRemote(capabilities Capabilities, urlPrefix string) (WebDriver, error) {
 	}
 	return wd, nil
 }
+func (wd *remoteWD) GetResponseBody(requestId string) ([]byte, error) {
+	requestURL := wd.requestURL("/session/%s/goog/cdp/execute", wd.id)
+	params := CdpCmd{
+		Cmd: "Network.getResponseBody",
+		Params: CdpParams{
+			RequestId: requestId,
+		},
+	}
+	data, err := json.Marshal(params)
+	if err != nil {
+		return nil, err
+	}
+	response, err := wd.execute("POST", requestURL, data)
+	if err != nil {
+		return nil, err
+	}
+	return response, nil
+}
 
 // DeleteSession deletes an existing session at the WebDriver instance
 // specified by the urlPrefix and the session ID.
@@ -250,8 +277,8 @@ func DeleteSession(urlPrefix, id string) error {
 }
 
 func (wd *remoteWD) stringCommand(urlTemplate string) (string, error) {
-	url := wd.requestURL(urlTemplate, wd.id)
-	response, err := wd.execute("GET", url, nil)
+	requestURL := wd.requestURL(urlTemplate, wd.id)
+	response, err := wd.execute("GET", requestURL, nil)
 	if err != nil {
 		return "", err
 	}
@@ -285,8 +312,8 @@ func (wd *remoteWD) voidCommand(urlTemplate string, params interface{}) error {
 }
 
 func (wd remoteWD) stringsCommand(urlTemplate string) ([]string, error) {
-	url := wd.requestURL(urlTemplate, wd.id)
-	response, err := wd.execute("GET", url, nil)
+	requestURL := wd.requestURL(urlTemplate, wd.id)
+	response, err := wd.execute("GET", requestURL, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -300,8 +327,8 @@ func (wd remoteWD) stringsCommand(urlTemplate string) ([]string, error) {
 }
 
 func (wd *remoteWD) boolCommand(urlTemplate string) (bool, error) {
-	url := wd.requestURL(urlTemplate, wd.id)
-	response, err := wd.execute("GET", url, nil)
+	requestURL := wd.requestURL(urlTemplate, wd.id)
+	response, err := wd.execute("GET", requestURL, nil)
 	if err != nil {
 		return false, err
 	}
@@ -315,8 +342,8 @@ func (wd *remoteWD) boolCommand(urlTemplate string) (bool, error) {
 }
 
 func (wd *remoteWD) Status() (*Status, error) {
-	url := wd.requestURL("/status")
-	reply, err := wd.execute("GET", url, nil)
+	requestURL := wd.requestURL("/status")
+	reply, err := wd.execute("GET", requestURL, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -538,8 +565,8 @@ func (wd *remoteWD) SwitchSession(sessionID string) error {
 }
 
 func (wd *remoteWD) Capabilities() (Capabilities, error) {
-	url := wd.requestURL("/session/%s", wd.id)
-	response, err := wd.execute("GET", url, nil)
+	requestURL := wd.requestURL("/session/%s", wd.id)
+	response, err := wd.execute("GET", requestURL, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -612,8 +639,8 @@ func (wd *remoteWD) WindowHandles() ([]string, error) {
 }
 
 func (wd *remoteWD) CurrentURL() (string, error) {
-	url := wd.requestURL("/session/%s/url", wd.id)
-	response, err := wd.execute("GET", url, nil)
+	requestURL := wd.requestURL("/session/%s/url", wd.id)
+	response, err := wd.execute("GET", requestURL, nil)
 	if err != nil {
 		return "", err
 	}
@@ -766,8 +793,8 @@ func (wd *remoteWD) FindElements(by, value string) ([]WebElement, error) {
 }
 
 func (wd *remoteWD) Close() error {
-	url := wd.requestURL("/session/%s/window", wd.id)
-	_, err := wd.execute("DELETE", url, nil)
+	requestURL := wd.requestURL("/session/%s/window", wd.id)
+	_, err := wd.execute("DELETE", requestURL, nil)
 	return err
 }
 
@@ -794,8 +821,8 @@ func (wd *remoteWD) MaximizeWindow(name string) error {
 				return err
 			}
 		}
-		url := wd.requestURL("/session/%s/window/%s/maximize", wd.id, name)
-		_, err := wd.execute("POST", url, nil)
+		requestURL := wd.requestURL("/session/%s/window/%s/maximize", wd.id, name)
+		_, err := wd.execute("POST", requestURL, nil)
 		return err
 	}
 	return wd.modifyWindow(name, "POST", "maximize", map[string]string{})
@@ -824,12 +851,12 @@ func (wd *remoteWD) modifyWindow(name, verb, command string, params interface{})
 		}
 	}
 
-	url := wd.requestURL("/session/%s/window", wd.id)
+	requestURL := wd.requestURL("/session/%s/window", wd.id)
 	if command != "" {
 		if wd.w3cCompatible {
-			url = wd.requestURL("/session/%s/window/%s", wd.id, command)
+			requestURL = wd.requestURL("/session/%s/window/%s", wd.id, command)
 		} else {
-			url = wd.requestURL("/session/%s/window/%s/%s", wd.id, name, command)
+			requestURL = wd.requestURL("/session/%s/window/%s/%s", wd.id, name, command)
 		}
 	}
 
@@ -841,7 +868,7 @@ func (wd *remoteWD) modifyWindow(name, verb, command string, params interface{})
 		}
 	}
 
-	if _, err := wd.execute(verb, url, data); err != nil {
+	if _, err := wd.execute(verb, requestURL, data); err != nil {
 		return err
 	}
 
@@ -896,8 +923,8 @@ func (wd *remoteWD) ActiveElement() (WebElement, error) {
 	if wd.browser == "firefox" && wd.browserVersion.Major < 47 {
 		verb = "POST"
 	}
-	url := wd.requestURL("/session/%s/element/active", wd.id)
-	response, err := wd.execute(verb, url, nil)
+	requestURL := wd.requestURL("/session/%s/element/active", wd.id)
+	response, err := wd.execute(verb, requestURL, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -967,8 +994,8 @@ func (wd *remoteWD) GetCookie(name string) (Cookie, error) {
 		}
 		return Cookie{}, errors.New("cookie not found")
 	}
-	url := wd.requestURL("/session/%s/cookie/%s", wd.id, name)
-	data, err := wd.execute("GET", url, nil)
+	requestURL := wd.requestURL("/session/%s/cookie/%s", wd.id, name)
+	data, err := wd.execute("GET", requestURL, nil)
 	if err != nil {
 		return Cookie{}, err
 	}
@@ -992,8 +1019,8 @@ func (wd *remoteWD) GetCookie(name string) (Cookie, error) {
 }
 
 func (wd *remoteWD) GetCookies() ([]Cookie, error) {
-	url := wd.requestURL("/session/%s/cookie", wd.id)
-	data, err := wd.execute("GET", url, nil)
+	requestURL := wd.requestURL("/session/%s/cookie", wd.id)
+	data, err := wd.execute("GET", requestURL, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -1017,14 +1044,14 @@ func (wd *remoteWD) AddCookie(cookie *Cookie) error {
 }
 
 func (wd *remoteWD) DeleteAllCookies() error {
-	url := wd.requestURL("/session/%s/cookie", wd.id)
-	_, err := wd.execute("DELETE", url, nil)
+	requestURL := wd.requestURL("/session/%s/cookie", wd.id)
+	_, err := wd.execute("DELETE", requestURL, nil)
 	return err
 }
 
 func (wd *remoteWD) DeleteCookie(name string) error {
-	url := wd.requestURL("/session/%s/cookie/%s", wd.id, name)
-	_, err := wd.execute("DELETE", url, nil)
+	requestURL := wd.requestURL("/session/%s/cookie/%s", wd.id, name)
+	_, err := wd.execute("DELETE", requestURL, nil)
 	return err
 }
 
@@ -1279,7 +1306,7 @@ func (wd *remoteWD) Screenshot() ([]byte, error) {
 	// Selenium returns a base64 encoded image.
 	buf := []byte(data)
 	decoder := base64.NewDecoder(base64.StdEncoding, bytes.NewBuffer(buf))
-	return ioutil.ReadAll(decoder)
+	return io.ReadAll(decoder)
 }
 
 // Condition is an alias for a type that is passed as an argument
@@ -1323,7 +1350,7 @@ func (wd *remoteWD) Wait(condition Condition) error {
 }
 
 func (wd *remoteWD) Log(typ log.Type) ([]log.Message, error) {
-	url := wd.requestURL("/session/%s/log", wd.id)
+	requestURL := wd.requestURL("/session/%s/log", wd.id)
 	params := map[string]log.Type{
 		"type": typ,
 	}
@@ -1331,7 +1358,7 @@ func (wd *remoteWD) Log(typ log.Type) ([]log.Message, error) {
 	if err != nil {
 		return nil, err
 	}
-	response, err := wd.execute("POST", url, data)
+	response, err := wd.execute("POST", requestURL, data)
 	if err != nil {
 		return nil, err
 	}
@@ -1421,8 +1448,8 @@ func (elem *remoteWE) MoveTo(xOffset, yOffset int) error {
 }
 
 func (elem *remoteWE) FindElement(by, value string) (WebElement, error) {
-	url := fmt.Sprintf("/session/%%s/element/%s/element", elem.id)
-	response, err := elem.parent.find(by, value, "", url)
+	requestUrl := fmt.Sprintf("/session/%%s/element/%s/element", elem.id)
+	response, err := elem.parent.find(by, value, "", requestUrl)
 	if err != nil {
 		return nil, err
 	}
@@ -1431,8 +1458,8 @@ func (elem *remoteWE) FindElement(by, value string) (WebElement, error) {
 }
 
 func (elem *remoteWE) FindElements(by, value string) ([]WebElement, error) {
-	url := fmt.Sprintf("/session/%%s/element/%s/element", elem.id)
-	response, err := elem.parent.find(by, value, "s", url)
+	requestUrl := fmt.Sprintf("/session/%%s/element/%s/element", elem.id)
+	response, err := elem.parent.find(by, value, "s", requestUrl)
 	if err != nil {
 		return nil, err
 	}
@@ -1483,9 +1510,9 @@ func round(f float64) int {
 func (elem *remoteWE) location(suffix string) (*Point, error) {
 	if !elem.parent.w3cCompatible {
 		wd := elem.parent
-		path := "/session/%s/element/%s/location" + suffix
-		url := wd.requestURL(path, wd.id, elem.id)
-		response, err := wd.execute("GET", url, nil)
+		p := "/session/%s/element/%s/location" + suffix
+		requestURL := wd.requestURL(p, wd.id, elem.id)
+		response, err := wd.execute("GET", requestURL, nil)
 		if err != nil {
 			return nil, err
 		}
@@ -1514,8 +1541,8 @@ func (elem *remoteWE) LocationInView() (*Point, error) {
 func (elem *remoteWE) Size() (*Size, error) {
 	if !elem.parent.w3cCompatible {
 		wd := elem.parent
-		url := wd.requestURL("/session/%s/element/%s/size", wd.id, elem.id)
-		response, err := wd.execute("GET", url, nil)
+		requestURL := wd.requestURL("/session/%s/element/%s/size", wd.id, elem.id)
+		response, err := wd.execute("GET", requestURL, nil)
 		if err != nil {
 			return nil, err
 		}
@@ -1544,8 +1571,8 @@ type rect struct {
 // rect implements the "Get Element Rect" method of the W3C standard.
 func (elem *remoteWE) rect() (*rect, error) {
 	wd := elem.parent
-	url := wd.requestURL("/session/%s/element/%s/rect", wd.id, elem.id)
-	response, err := wd.execute("GET", url, nil)
+	requestURL := wd.requestURL("/session/%s/element/%s/rect", wd.id, elem.id)
+	response, err := wd.execute("GET", requestURL, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -1577,5 +1604,5 @@ func (elem *remoteWE) Screenshot(scroll bool) ([]byte, error) {
 	// Selenium returns a base64 encoded image.
 	buf := []byte(data)
 	decoder := base64.NewDecoder(base64.StdEncoding, bytes.NewBuffer(buf))
-	return ioutil.ReadAll(decoder)
+	return io.ReadAll(decoder)
 }
